@@ -1,5 +1,7 @@
 <script setup>
 import { usePalEditorStore } from '@/stores/paleditor'
+import BatchPassiveApplyModal from "@/components/BatchPassiveApplyModal.vue";
+import BatchTemplateApplyModal from "@/components/BatchTemplateApplyModal.vue";
 const palStore = usePalEditorStore()
 
 function formatString(input) {
@@ -64,9 +66,20 @@ const suitabilityIconSrc = key => {
 <template>
   <div :class="['PalEditor', { 'unref': palStore.SELECTED_PAL_DATA.Is_Unref_Pal }]">
     <div class="EditorItem item flex-v basicInfo">
-      <button id="dump_btn" @click="palStore.dumpPalData" :disabled="palStore.LOADING_FLAG">
-        {{ palStore.getTranslatedText("Editor_Btn_Export_Data") }}
-      </button>
+      <div class="editField basic-header">
+        <button id="dump_btn" @click="palStore.dumpPalData" :disabled="palStore.LOADING_FLAG">
+          {{ palStore.getTranslatedText("Editor_Btn_Export_Data") }}
+        </button>
+        <button
+          id="dump_batch_same_species_btn"
+          class="edit_text small"
+          @click="palStore.openBatchTemplateModal"
+          :disabled="palStore.LOADING_FLAG"
+          :title="palStore.getTranslatedText('BatchApply_Passive_QuickHint')"
+        >
+          {{ palStore.getTranslatedText("BatchApply_Passive_Button_SameSpecies") }}
+        </button>
+      </div>
       <button id="dupe_btn" @click="palStore.dupePal" :disabled="palStore.LOADING_FLAG"
         v-if="!palStore.BASE_PAL_BTN_CLK_FLAG">
         {{ palStore.getTranslatedText("Editor_Btn_Dupe_Pal") }}
@@ -336,9 +349,19 @@ const suitabilityIconSrc = key => {
       </div>
     </div>
     <div class="EditorItem item flex-v left skillPanel">
-      <p class="cat">
-        {{ palStore.getTranslatedText("Editor_Passive_Skills") }}
-      </p>
+      <div class="editField spaceBetween passive-header">
+        <p class="cat">
+          {{ palStore.getTranslatedText("Editor_Passive_Skills") }}
+        </p>
+        <button
+          class="edit passive-batch-btn"
+          @click="palStore.openBatchPassiveModal"
+          :disabled="palStore.LOADING_FLAG"
+          :title="palStore.getTranslatedText('BatchApply_Passive_QuickHint')"
+        >
+          {{ palStore.getTranslatedText("BatchApply_Passive_Button") }}
+        </button>
+      </div>
       <div class="flex-h">
         <div class="editField skillList">
           <div v-for="skill in palStore.SELECTED_PAL_DATA.PassiveSkillList">
@@ -467,10 +490,32 @@ const suitabilityIconSrc = key => {
         </div>
       </div>
     </div>
+
+    <BatchPassiveApplyModal />
+    <BatchTemplateApplyModal />
   </div>
 </template>
 
 <style scoped>
+div.passive-header {
+  align-items: center;
+  margin-bottom: .3rem;
+}
+
+button.passive-batch-btn {
+  white-space: nowrap;
+  padding-inline: .6rem;
+  width: auto;
+  min-width: 4.5rem;
+}
+
+div.basic-header {
+  display: flex;
+  gap: .3rem;
+  margin-bottom: .5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
 .PalEditor {
   display: flex;
   height: var(--sub-height);
@@ -709,6 +754,39 @@ button#dump_btn:hover {
 }
 
 button#dump_btn:disabled {
+  background-color: #8a8a8a;
+  box-shadow: 0 0 0;
+  filter: grayscale(100%);
+  cursor: not-allowed;
+}
+
+button#dump_batch_same_species_btn {
+  position: absolute;
+  top: 1rem;
+  left: calc(1rem + 8.5rem);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 2rem;
+  padding: 0 1rem;
+  margin: 0;
+  background-color: #555555;
+  color: rgb(220, 220, 220);
+  border: none;
+  outline: none;
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  transition: all 0.15s ease-in-out;
+}
+
+button#dump_batch_same_species_btn:hover {
+  background-color: #3e3e3e;
+  box-shadow: 2px 2px 10px rgb(38, 38, 38);
+}
+
+button#dump_batch_same_species_btn:disabled {
   background-color: #8a8a8a;
   box-shadow: 0 0 0;
   filter: grayscale(100%);

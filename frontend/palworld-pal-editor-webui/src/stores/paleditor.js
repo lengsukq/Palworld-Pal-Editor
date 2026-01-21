@@ -8,6 +8,19 @@ export const usePalEditorStore = defineStore("paleditor", () => {
     const MAX_INVALID_LEVEL = 100;
     const MAX_SOULS_LEVEL = 20;
     const MAX_SUITABILITY_LEVEL = 5;
+
+    const SHOW_BATCH_PASSIVE_MODAL = ref(false);
+    const BATCH_PASSIVE_SCOPE = ref("filtered"); // filtered | all
+    const BATCH_PASSIVE_MODE = ref("replace"); // replace | add
+    const BATCH_PASSIVE_SELECTED_SKILLS = ref(["", "", "", ""]);
+    const BATCH_PASSIVE_SELECTED_PAL_IDS = ref([]);
+
+    const SHOW_BATCH_TEMPLATE_MODAL = ref(false);
+    const BATCH_TEMPLATE_INCLUDE_PASSIVE = ref(true);
+    const BATCH_TEMPLATE_INCLUDE_SUITABILITY = ref(true);
+    const BATCH_TEMPLATE_INCLUDE_TALENT = ref(true);
+    const BATCH_TEMPLATE_INCLUDE_SOULS = ref(true);
+    const BATCH_TEMPLATE_INCLUDE_CONDENSER = ref(true);
     class Player {
         constructor(obj) {
             this.InstanceId = obj.InstanceId;
@@ -1267,6 +1280,253 @@ export const usePalEditorStore = defineStore("paleditor", () => {
         if (!no_set_loading_flag) LOADING_FLAG.value = false;
     }
 
+    function openBatchPassiveModal(sameSpeciesOnly = false) {
+        const seed = Array.isArray(SELECTED_PAL_DATA.value?.PassiveSkillList)
+            ? SELECTED_PAL_DATA.value.PassiveSkillList.slice(0, 4)
+            : [];
+        const nextSkills = ["", "", "", ""];
+        for (let i = 0; i < Math.min(4, seed.length); i++) nextSkills[i] = seed[i] || "";
+        BATCH_PASSIVE_SELECTED_SKILLS.value = nextSkills;
+        BATCH_PASSIVE_SELECTED_PAL_IDS.value = [];
+        if (sameSpeciesOnly) {
+            BATCH_PASSIVE_SCOPE.value = "filtered";
+            selectSameSpeciesForBatch();
+        }
+        SHOW_BATCH_PASSIVE_MODAL.value = true;
+    }
+
+    function getSameSpeciesPalIds() {
+        if (!SELECTED_PAL_DATA.value) return [];
+        const targetKey = SELECTED_PAL_DATA.value.DataAccessKey;
+        const pals = Array.from(PAL_MAP.value.values()).filter((p) => {
+            if (!p) return false;
+            if (p.DataAccessKey !== targetKey) return false;
+            return !isFilteredPal(p);
+        });
+        return pals.map((p) => p.InstanceId).filter(Boolean);
+    }
+
+    function getBatchTargetPalIds(scopeOverride) {
+        const scope = scopeOverride || BATCH_PASSIVE_SCOPE.value;
+        const pals = Array.from(PAL_MAP.value.values());
+        const scoped = scope === "filtered" ? pals.filter((p) => !isFilteredPal(p)) : pals;
+        const scopedIds = scoped.map((p) => p.InstanceId).filter(Boolean);
+
+        const picked = BATCH_PASSIVE_SELECTED_PAL_IDS.value || [];
+        if (!picked.length) return scopedIds;
+
+        const pickedSet = new Set(picked);
+        return scopedIds.filter((id) => pickedSet.has(id));
+    }
+
+    function toggleBatchPalSelection(palId) {
+        if (!palId) return;
+        const list = [...BATCH_PASSIVE_SELECTED_PAL_IDS.value];
+        const idx = list.indexOf(palId);
+        if (idx >= 0) {
+            list.splice(idx, 1);
+        } else {
+            list.push(palId);
+        }
+        BATCH_PASSIVE_SELECTED_PAL_IDS.value = list;
+    }
+
+    function isPalSelectedForBatch(palId) {
+        return BATCH_PASSIVE_SELECTED_PAL_IDS.value.includes(palId);
+    }
+
+    function clearBatchPalSelection() {
+        BATCH_PASSIVE_SELECTED_PAL_IDS.value = [];
+    }
+
+    function selectSameSpeciesForBatch() {
+        BATCH_PASSIVE_SELECTED_PAL_IDS.value = getSameSpeciesPalIds();
+    }
+
+    function openBatchTemplateModal() {
+        SHOW_BATCH_TEMPLATE_MODAL.value = true;
+        BATCH_TEMPLATE_INCLUDE_PASSIVE.value = true;
+        BATCH_TEMPLATE_INCLUDE_SUITABILITY.value = true;
+        BATCH_TEMPLATE_INCLUDE_TALENT.value = true;
+        BATCH_TEMPLATE_INCLUDE_SOULS.value = true;
+        BATCH_TEMPLATE_INCLUDE_CONDENSER.value = true;
+    }
+
+    async function batchApplyTemplateToSameSpecies() {
+        if (!SELECTED_PAL_DATA.value) return;
+        let no_set_loading_flag = LOADING_FLAG.value;
+        if (!no_set_loading_flag) LOADING_FLAG.value = true;
+
+        const base = SELECTED_PAL_DATA.value;
+        const palIds = getSameSpeciesPalIds().filter(
+            (id) => id !== base.InstanceId
+        );
+        if (!palIds.length) {
+            if (!no_set_loading_flag) LOADING_FLAG.value = false;
+            return;
+        }
+
+        for (const palId of palIds) {
+            if (BATCH_TEMPLATE_INCLUDE_PASSIVE.value) {
+                const targetPal = PAL_MAP.value.get(palId);
+                const currentPassive = Array.isArray(targetPal?.PassiveSkillList)
+                    ? [...targetPal.PassiveSkillList]
+                    : [];
+                for (const skill of currentPassive) {
+                    await patchPalData({
+                        PalGuid: palId,
+                        key: "pop_PassiveSkillList",
+                        value: skill,
+                    });
+                }
+                const desired = Array.isArray(base.PassiveSkillList)
+                    ? base.PassiveSkillList
+                    : [];
+                for (const skill of desired) {
+                    await patchPalData({
+                        PalGuid: palId,
+                        key: "add_PassiveSkillList",
+                        value: skill,
+                    });
+                }
+            }
+
+            if (BATCH_TEMPLATE_INCLUDE_SUITABILITY.value) {
+                const suits = base.Suitabilities || {};
+                for (const [name, level] of Object.entries(suits)) {
+                    await patchPalData({
+                        PalGuid: palId,
+                        key: "set_Suitability",
+                        value: { name, level },
+                    });
+                }
+            }
+
+            if (BATCH_TEMPLATE_INCLUDE_TALENT.value) {
+                const talents = [
+                    ["Talent_HP", base.Talent_HP],
+                    ["Talent_Melee", base.Talent_Melee],
+                    ["Talent_Shot", base.Talent_Shot],
+                    ["Talent_Defense", base.Talent_Defense],
+                ];
+                for (const [key, value] of talents) {
+                    await patchPalData({
+                        PalGuid: palId,
+                        key,
+                        value,
+                    });
+                }
+            }
+
+            if (BATCH_TEMPLATE_INCLUDE_CONDENSER.value) {
+                const ranks = [
+                    ["Rank", base.Rank],
+                    ["Rank_HP", base.Rank_HP],
+                    ["Rank_Attack", base.Rank_Attack],
+                    ["Rank_Defence", base.Rank_Defence],
+                    ["Rank_CraftSpeed", base.Rank_CraftSpeed],
+                ];
+                for (const [key, value] of ranks) {
+                    await patchPalData({
+                        PalGuid: palId,
+                        key,
+                        value,
+                    });
+                }
+            }
+
+            // Souls/statue values are not explicitly exposed via API keys yet.
+        }
+
+        if (SELECTED_PAL_ID.value) {
+            await selectPal(SELECTED_PAL_ID.value, true);
+            UPDATE_PAL_RESELECT_CTR.value++;
+        }
+
+        if (!no_set_loading_flag) LOADING_FLAG.value = false;
+    }
+
+    async function patchPalData({ PalGuid, key, value }) {
+        return await PATCH("/api/pal/paldata", {
+            key,
+            value,
+            PlayerUId: GET_PAL_OWNER_API_ID(),
+            PalGuid,
+        });
+    }
+
+    async function batchApplyPassiveSkills() {
+        let no_set_loading_flag = LOADING_FLAG.value;
+        if (!no_set_loading_flag) LOADING_FLAG.value = true;
+
+        const desiredSkills = Array.from(
+            new Set(BATCH_PASSIVE_SELECTED_SKILLS.value.filter((s) => Boolean(s)))
+        ).slice(0, 4);
+        if (desiredSkills.length === 0) {
+            alert("Select at least one passive skill.");
+            if (!no_set_loading_flag) LOADING_FLAG.value = false;
+            return;
+        }
+
+        const palIds = getBatchTargetPalIds();
+        if (palIds.length === 0) {
+            alert("No target pals.");
+            if (!no_set_loading_flag) LOADING_FLAG.value = false;
+            return;
+        }
+
+        for (const palId of palIds) {
+            const pal = PAL_MAP.value.get(palId);
+            if (!pal) continue;
+
+            const current = Array.isArray(pal.PassiveSkillList) ? [...pal.PassiveSkillList] : [];
+
+            if (BATCH_PASSIVE_MODE.value === "replace") {
+                for (const skill of current) {
+                    const r = await patchPalData({
+                        PalGuid: palId,
+                        key: "pop_PassiveSkillList",
+                        value: skill,
+                    });
+                    if (r === false) continue;
+                }
+
+                for (const skill of desiredSkills) {
+                    const r = await patchPalData({
+                        PalGuid: palId,
+                        key: "add_PassiveSkillList",
+                        value: skill,
+                    });
+                    if (r === false) continue;
+                }
+
+                pal.PassiveSkillList = [...desiredSkills];
+            } else {
+                const next = [...current];
+                for (const skill of desiredSkills) {
+                    if (next.includes(skill)) continue;
+                    if (HIDE_INVALID_OPTIONS.value && next.length >= 4) break;
+                    const r = await patchPalData({
+                        PalGuid: palId,
+                        key: "add_PassiveSkillList",
+                        value: skill,
+                    });
+                    if (r === false) continue;
+                    next.push(skill);
+                }
+                pal.PassiveSkillList = next;
+            }
+        }
+
+        // Refresh selected pal UI once at the end.
+        if (SELECTED_PAL_ID.value) {
+            await selectPal(SELECTED_PAL_ID.value, true);
+            UPDATE_PAL_RESELECT_CTR.value++;
+        }
+
+        if (!no_set_loading_flag) LOADING_FLAG.value = false;
+    }
+
     function GET_PAL_OWNER_API_ID() {
         return BASE_PAL_BTN_CLK_FLAG.value
             ? PAL_BASE_WORKER_BTN.value
@@ -1592,6 +1852,29 @@ export const usePalEditorStore = defineStore("paleditor", () => {
         selectPlayer,
         selectPal,
         updatePal,
+        openBatchPassiveModal,
+        batchApplyPassiveSkills,
+        getBatchTargetPalIds,
+        openBatchTemplateModal,
+        batchApplyTemplateToSameSpecies,
+        getSameSpeciesPalIds,
+
+        SHOW_BATCH_PASSIVE_MODAL,
+        BATCH_PASSIVE_SCOPE,
+        BATCH_PASSIVE_MODE,
+        BATCH_PASSIVE_SELECTED_SKILLS,
+        BATCH_PASSIVE_SELECTED_PAL_IDS,
+
+        SHOW_BATCH_TEMPLATE_MODAL,
+        BATCH_TEMPLATE_INCLUDE_PASSIVE,
+        BATCH_TEMPLATE_INCLUDE_SUITABILITY,
+        BATCH_TEMPLATE_INCLUDE_TALENT,
+        BATCH_TEMPLATE_INCLUDE_SOULS,
+        BATCH_TEMPLATE_INCLUDE_CONDENSER,
+        toggleBatchPalSelection,
+        isPalSelectedForBatch,
+        clearBatchPalSelection,
+        selectSameSpeciesForBatch,
         updatePlayer,
         writeSave,
         fetch_config,
