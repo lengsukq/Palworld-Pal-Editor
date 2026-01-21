@@ -21,6 +21,9 @@ export const usePalEditorStore = defineStore("paleditor", () => {
     const BATCH_TEMPLATE_INCLUDE_TALENT = ref(true);
     const BATCH_TEMPLATE_INCLUDE_SOULS = ref(true);
     const BATCH_TEMPLATE_INCLUDE_CONDENSER = ref(true);
+    const BATCH_TEMPLATE_IN_PROGRESS = ref(false);
+    const BATCH_TEMPLATE_PROGRESS = ref(0);
+    const BATCH_TEMPLATE_TOTAL = ref(0);
     class Player {
         constructor(obj) {
             this.InstanceId = obj.InstanceId;
@@ -1358,31 +1361,72 @@ export const usePalEditorStore = defineStore("paleditor", () => {
         if (!no_set_loading_flag) LOADING_FLAG.value = true;
 
         const base = SELECTED_PAL_DATA.value;
-        const palIds = getSameSpeciesPalIds().filter(
-            (id) => id !== base.InstanceId
-        );
+        // Use the modal's explicit selection when present; otherwise fall back to all same-species pals.
+        const picked = Array.isArray(BATCH_PASSIVE_SELECTED_PAL_IDS.value)
+            ? BATCH_PASSIVE_SELECTED_PAL_IDS.value
+            : [];
+        const sourceIds = picked.length ? picked : getSameSpeciesPalIds();
+        const palIds = sourceIds.filter((id) => id && id !== base.InstanceId);
         if (!palIds.length) {
             if (!no_set_loading_flag) LOADING_FLAG.value = false;
             return;
         }
 
+        BATCH_TEMPLATE_IN_PROGRESS.value = true;
+        BATCH_TEMPLATE_TOTAL.value = palIds.length;
+        BATCH_TEMPLATE_PROGRESS.value = 0;
+
+        const desiredPassive = Array.from(
+            new Set(
+                (Array.isArray(base.PassiveSkillList) ? base.PassiveSkillList : []).filter(Boolean)
+            )
+        ).slice(0, 4);
+
+        const ownerId = GET_PAL_OWNER_API_ID();
         for (const palId of palIds) {
             if (BATCH_TEMPLATE_INCLUDE_PASSIVE.value) {
-                const targetPal = PAL_MAP.value.get(palId);
-                const currentPassive = Array.isArray(targetPal?.PassiveSkillList)
-                    ? [...targetPal.PassiveSkillList]
-                    : [];
-                for (const skill of currentPassive) {
-                    await patchPalData({
+                // 逐个删除被动技能：每次删除后重新获取最新列表，直到列表为空
+                let hasMoreSkills = true;
+                while (hasMoreSkills) {
+                    // 重新获取最新的帕鲁数据
+                    await fetchPalData(ownerId, palId);
+                    
+                    // 从正确的数据源获取帕鲁数据
+                    let targetPal = null;
+                    if (ownerId == PAL_BASE_WORKER_BTN.value) {
+                        targetPal = BASE_PAL_MAP.value.get(palId);
+                    } else {
+                        const player = PLAYER_MAP.value.get(ownerId);
+                        if (player) {
+                            targetPal = player.pals.get(palId);
+                        }
+                    }
+                    
+                    const currentPassive = Array.isArray(targetPal?.PassiveSkillList)
+                        ? [...targetPal.PassiveSkillList]
+                        : [];
+                    
+                    if (currentPassive.length === 0) {
+                        hasMoreSkills = false;
+                        break;
+                    }
+                    
+                    // 删除第一个被动技能
+                    const skillToRemove = currentPassive[0];
+                    const result = await patchPalData({
                         PalGuid: palId,
                         key: "pop_PassiveSkillList",
-                        value: skill,
+                        value: skillToRemove,
                     });
+                    
+                    // 如果删除失败，跳出循环避免无限循环
+                    if (result === false || (result && result.status !== 0)) {
+                        break;
+                    }
                 }
-                const desired = Array.isArray(base.PassiveSkillList)
-                    ? base.PassiveSkillList
-                    : [];
-                for (const skill of desired) {
+                
+                // 清空后，逐个添加新的被动技能
+                for (const skill of desiredPassive) {
                     await patchPalData({
                         PalGuid: palId,
                         key: "add_PassiveSkillList",
@@ -1436,12 +1480,17 @@ export const usePalEditorStore = defineStore("paleditor", () => {
             }
 
             // Souls/statue values are not explicitly exposed via API keys yet.
+
+            BATCH_TEMPLATE_PROGRESS.value += 1;
+            await nextTick();
         }
 
         if (SELECTED_PAL_ID.value) {
             await selectPal(SELECTED_PAL_ID.value, true);
             UPDATE_PAL_RESELECT_CTR.value++;
         }
+
+        BATCH_TEMPLATE_IN_PROGRESS.value = false;
 
         if (!no_set_loading_flag) LOADING_FLAG.value = false;
     }
@@ -1475,20 +1524,47 @@ export const usePalEditorStore = defineStore("paleditor", () => {
             return;
         }
 
+        const ownerId = GET_PAL_OWNER_API_ID();
+
         for (const palId of palIds) {
             const pal = PAL_MAP.value.get(palId);
             if (!pal) continue;
 
-            const current = Array.isArray(pal.PassiveSkillList) ? [...pal.PassiveSkillList] : [];
-
             if (BATCH_PASSIVE_MODE.value === "replace") {
-                for (const skill of current) {
+                // 逐个删除：每次删除前重新获取该帕鲁的最新被动技能列表，直到列表为空
+                let hasMoreSkills = true;
+                while (hasMoreSkills) {
+                    // 重新获取最新的帕鲁数据
+                    await fetchPalData(ownerId, palId);
+
+                    // 从正确的数据源读取最新帕鲁
+                    let targetPal = null;
+                    if (ownerId == PAL_BASE_WORKER_BTN.value) {
+                        targetPal = BASE_PAL_MAP.value.get(palId);
+                    } else {
+                        const player = PLAYER_MAP.value.get(ownerId);
+                        if (player) targetPal = player.pals.get(palId);
+                    }
+
+                    const currentPassive = Array.isArray(targetPal?.PassiveSkillList)
+                        ? [...targetPal.PassiveSkillList]
+                        : [];
+
+                    if (currentPassive.length === 0) {
+                        hasMoreSkills = false;
+                        break;
+                    }
+
+                    const skillToRemove = currentPassive[0];
                     const r = await patchPalData({
                         PalGuid: palId,
                         key: "pop_PassiveSkillList",
-                        value: skill,
+                        value: skillToRemove,
                     });
-                    if (r === false) continue;
+                    if (r === false || (r && r.status !== 0)) {
+                        // 后端删除失败，避免死循环
+                        break;
+                    }
                 }
 
                 for (const skill of desiredSkills) {
@@ -1502,7 +1578,7 @@ export const usePalEditorStore = defineStore("paleditor", () => {
 
                 pal.PassiveSkillList = [...desiredSkills];
             } else {
-                const next = [...current];
+                const next = Array.isArray(pal.PassiveSkillList) ? [...pal.PassiveSkillList] : [];
                 for (const skill of desiredSkills) {
                     if (next.includes(skill)) continue;
                     if (HIDE_INVALID_OPTIONS.value && next.length >= 4) break;
@@ -1871,6 +1947,9 @@ export const usePalEditorStore = defineStore("paleditor", () => {
         BATCH_TEMPLATE_INCLUDE_TALENT,
         BATCH_TEMPLATE_INCLUDE_SOULS,
         BATCH_TEMPLATE_INCLUDE_CONDENSER,
+        BATCH_TEMPLATE_IN_PROGRESS,
+        BATCH_TEMPLATE_PROGRESS,
+        BATCH_TEMPLATE_TOTAL,
         toggleBatchPalSelection,
         isPalSelectedForBatch,
         clearBatchPalSelection,

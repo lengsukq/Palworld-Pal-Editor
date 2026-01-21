@@ -96,6 +96,7 @@ export default {
     BatchTemplate_Section_Condenser: "帕鲁浓缩机",
     BatchTemplate_Sections_Hint: "只会同步勾选的部分；不会影响未勾选的内容。",
     BatchTemplate_Confirm: "开始批量应用",
+    BatchTemplate_Progress: "批量进度",
     Editor_Select_Skill: "选择添加的技能",
     Editor_Equipped_Skills: "装备的主动技能",
     Editor_Skill_ATK: "攻击力: ",

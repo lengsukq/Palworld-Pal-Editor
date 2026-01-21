@@ -95,6 +95,7 @@ export default {
     BatchTemplate_Section_Condenser: "Condenser (rank & shards)",
     BatchTemplate_Sections_Hint: "Only checked sections will be synchronized; unchecked parts will remain unchanged.",
     BatchTemplate_Confirm: "Apply template to pals",
+    BatchTemplate_Progress: "Batch progress",
     Editor_Select_Skill: "Add Skills",
     Editor_Equipped_Skills: "EQUIPPED ACTIVE SKILLS",
     Editor_Skill_ATK: "Attack: ",
