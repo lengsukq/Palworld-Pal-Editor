@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Continue'
 # Function to check and return the available Python command
 function Get-PythonCommand {
-    $commands = @('python3', 'python')
+    $commands = @('py', 'python3', 'python')
     foreach ($cmd in $commands) {
         $version = & $cmd --version 2>&1
         if ($version -match "Python 3.") {
